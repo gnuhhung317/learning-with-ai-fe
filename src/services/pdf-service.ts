@@ -1,5 +1,8 @@
-import PDFDocument from 'pdfkit-browserify';
-import { Buffer } from 'buffer';
+import PDFDocument from 'pdfkit';
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Initialize PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 export class PDFService {
   public validatePDFFile(file: File): boolean {
@@ -15,13 +18,29 @@ export class PDFService {
     try {
       console.log('Starting PDF content extraction...');
       const arrayBuffer = await file.arrayBuffer();
-      console.log('File converted to ArrayBuffer successfully');
+      
+      // Load the PDF document using PDF.js
+      const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+      const pdf = await loadingTask.promise;
+      
+      if (!pdf) {
+        throw new Error('No content found in PDF');
+      }
 
-      // Note: PDFKit is primarily for PDF creation, not text extraction
-      // For a production environment, you might want to use a dedicated PDF parsing library
-      // This is a simplified implementation
-      const text = new TextDecoder().decode(arrayBuffer);
-      return this.processText(text);
+      let extractedText = '';
+      
+      // Extract text from each page
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items
+          .map(item => 'str' in item ? item.str : '')
+          .join(' ');
+        extractedText += pageText + '\n';
+      }
+
+      console.log('PDF text extracted successfully');
+      return this.processText(extractedText);
     } catch (error) {
       console.error('Error in PDF content extraction:', error instanceof Error ? error.message : 'Unknown error');
       throw new Error(`Failed to extract PDF content: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -32,7 +51,7 @@ export class PDFService {
    * Creates a new PDF document with Vietnamese font support
    * @returns PDFKit.PDFDocument
    */
-  public createDocument(): typeof PDFDocument {
+  public createDocument(): PDFKit.PDFDocument {
     const doc = new PDFDocument({
       size: 'A4',
       margin: 50,
@@ -43,12 +62,9 @@ export class PDFService {
         Producer: 'PDF Service',
         Creator: 'Quiz Generator',
         CreationDate: new Date()
-      },
-      compress: false
+      }
     });
 
-    // Use Helvetica as the default font since it has decent Unicode support
-    // and is available by default in PDFKit
     doc.font('Helvetica');
     return doc;
   }

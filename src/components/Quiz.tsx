@@ -1,16 +1,13 @@
 "use client";
 
 import React, { useState } from 'react';
-import { QuizService } from '../services/quiz-service';
-
-interface QuizProps {
-  apiKey: string;
-}
+import { API_CONFIG } from '../config/api-config';
 
 interface FormData {
   topic: string;
   level: string;
   numberOfQuestions: number;
+  description: string;
 }
 
 interface QuizQuestion {
@@ -20,23 +17,18 @@ interface QuizQuestion {
   explanation?: string;
 }
 
-export default function Quiz({ apiKey }: QuizProps) {
+export default function Quiz() {
   const [formData, setFormData] = useState<FormData>({
     topic: '',
     level: 'beginner',
-    numberOfQuestions: 5
+    numberOfQuestions: 5,
+    description: ''
   });
   const [loading, setLoading] = useState(false);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [selectedAnswers, setSelectedAnswers] = useState<number[]>([]);
   const [showResults, setShowResults] = useState<boolean[]>(new Array(questions.length).fill(false));
-
-  const handleQuestionSubmit = (questionIndex: number) => {
-    const newShowResults = [...showResults];
-    newShowResults[questionIndex] = true;
-    setShowResults(newShowResults);
-  };
   const [quizPdfUrl, setQuizPdfUrl] = useState<string | null>(null);
   const [answersPdfUrl, setAnswersPdfUrl] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -73,11 +65,11 @@ export default function Quiz({ apiKey }: QuizProps) {
     try {
       const pdfFormData = new FormData();
       pdfFormData.append('file', selectedFile);
-      pdfFormData.append('apiKey', apiKey);
       pdfFormData.append('numberOfQuestions', String(formData.numberOfQuestions));
       pdfFormData.append('level', formData.level);
+      pdfFormData.append('description', formData.description);
 
-      const response = await fetch('/api/quiz/pdf', {
+      const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.QUIZ_PDF}`, {
         method: 'POST',
         body: pdfFormData
       });
@@ -86,15 +78,37 @@ export default function Quiz({ apiKey }: QuizProps) {
         throw new Error('Failed to generate quiz from PDF');
       }
 
-      const { questions: newQuestions, quizPdfBuffer, answersPdfBuffer } = await response.json();
-
+      const { questions: newQuestions } = await response.json();
       setQuestions(newQuestions);
       setSelectedAnswers(new Array(newQuestions.length).fill(-1));
 
-      const quizBlob = new Blob([new Uint8Array(quizPdfBuffer)], { type: 'application/pdf' });
-      const answersBlob = new Blob([new Uint8Array(answersPdfBuffer)], { type: 'application/pdf' });
-      setQuizPdfUrl(URL.createObjectURL(quizBlob));
-      setAnswersPdfUrl(URL.createObjectURL(answersBlob));
+      // Generate quiz PDF URL
+      const quizResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.QUIZ_PDF_GENERATE}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ questions: newQuestions, type: 'quiz' })
+      });
+
+      if (quizResponse.ok) {
+        const quizBlob = await quizResponse.blob();
+        setQuizPdfUrl(URL.createObjectURL(quizBlob));
+      }
+
+      // Generate answers PDF URL
+      const answersResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.QUIZ_PDF_GENERATE}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ questions: newQuestions, type: 'answers' })
+      });
+
+      if (answersResponse.ok) {
+        const answersBlob = await answersResponse.blob();
+        setAnswersPdfUrl(URL.createObjectURL(answersBlob));
+      }
     } catch (err) {
       setError('Failed to generate quiz from PDF. Please try again.');
       console.error(err);
@@ -102,7 +116,6 @@ export default function Quiz({ apiKey }: QuizProps) {
       setLoading(false);
     }
   };
-  const quizService = new QuizService(apiKey);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -110,12 +123,12 @@ export default function Quiz({ apiKey }: QuizProps) {
     setError(null);
     setQuestions([]);
     setSelectedAnswers([]);
-setShowResults(new Array(questions.length).fill(false));
+    setShowResults(new Array(questions.length).fill(false));
     setQuizPdfUrl(null);
     setAnswersPdfUrl(null);
 
     try {
-      const response = await fetch('/api/quiz', {
+      const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.QUIZ}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -124,7 +137,6 @@ setShowResults(new Array(questions.length).fill(false));
           topic: formData.topic,
           level: formData.level,
           numberOfQuestions: formData.numberOfQuestions,
-          apiKey
         })
       });
 
@@ -132,16 +144,37 @@ setShowResults(new Array(questions.length).fill(false));
         throw new Error('Failed to generate quiz');
       }
 
-      const { questions: newQuestions, quizPdfBuffer, answersPdfBuffer } = await response.json();
-
+      const { questions: newQuestions } = await response.json();
       setQuestions(newQuestions);
       setSelectedAnswers(new Array(newQuestions.length).fill(-1));
 
-      // Create URLs for the PDF buffers
-      const quizBlob = new Blob([new Uint8Array(quizPdfBuffer)], { type: 'application/pdf' });
-      const answersBlob = new Blob([new Uint8Array(answersPdfBuffer)], { type: 'application/pdf' });
-      setQuizPdfUrl(URL.createObjectURL(quizBlob));
-      setAnswersPdfUrl(URL.createObjectURL(answersBlob));
+      // Generate quiz PDF URL
+      const quizResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.QUIZ_PDF_GENERATE}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ questions: newQuestions, type: 'quiz' })
+      });
+
+      if (quizResponse.ok) {
+        const quizBlob = await quizResponse.blob();
+        setQuizPdfUrl(URL.createObjectURL(quizBlob));
+      }
+
+      // Generate answers PDF URL
+      const answersResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.QUIZ_PDF_GENERATE}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ questions: newQuestions, type: 'answers' })
+      });
+
+      if (answersResponse.ok) {
+        const answersBlob = await answersResponse.blob();
+        setAnswersPdfUrl(URL.createObjectURL(answersBlob));
+      }
     } catch (err) {
       setError('Failed to generate quiz. Please try again.');
       console.error(err);
@@ -208,6 +241,17 @@ setShowResults(new Array(questions.length).fill(false));
               />
             </div>
 
+            <div>
+              <label className="block text-sm font-medium mb-2">Mô tả chủ đề</label>
+              <textarea
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                className="w-full p-2 border rounded-md"
+                rows={3}
+                placeholder="Nhập mô tả chi tiết về chủ đề để tạo câu hỏi tập trung vào nội dung chính"
+              />
+            </div>
+
             <button
               type="submit"
               disabled={loading}
@@ -235,6 +279,17 @@ setShowResults(new Array(questions.length).fill(false));
               )}
             </div>
 
+            <div>
+              <label className="block text-sm font-medium mb-2">Mô tả nội dung PDF</label>
+              <textarea
+                value={formData.description}
+                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                className="w-full p-2 border rounded-md"
+                rows={3}
+                placeholder="Nhập mô tả về nội dung của tệp PDF để tạo câu hỏi tập trung vào chủ đề chính"
+              />
+            </div>
+
             <button
               type="submit"
               disabled={loading || !selectedFile}
@@ -248,7 +303,7 @@ setShowResults(new Array(questions.length).fill(false));
 
       {error && (
         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
-          Không thể tạo bài kiểm tra. Vui lòng thử lại.
+          {error}
         </div>
       )}
 

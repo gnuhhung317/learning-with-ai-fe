@@ -1,9 +1,5 @@
-import Image from "next/image";
-import LearningPath from '../components/LearningPath';
 import Quiz from "@/components/Quiz";
 export default function Home() {
-  // In a real application, this would be securely managed through environment variables
-  const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -18,7 +14,7 @@ export default function Home() {
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         <div className="px-4 py-6 sm:px-0">
           <div className="border-t border-gray-200 pt-8">
-            <Quiz apiKey={apiKey} />
+            <Quiz  />
           </div>
         </div>
       </main>

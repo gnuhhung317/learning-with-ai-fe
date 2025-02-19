@@ -1,28 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { QuizService } from '@/services/quiz-service';
+import { API_CONFIG } from '@/config/api';
 
 export async function POST(request: NextRequest) {
   try {
-    const { topic, level, numberOfQuestions, apiKey } = await request.json();
+    const { topic, level, numberOfQuestions } = await request.json();
 
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: 'API key is required' },
-        { status: 401 }
-      );
+    const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.QUIZ}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        topic,
+        level,
+        numberOfQuestions
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`API request failed with status ${response.status}`);
     }
 
-    const quizService = new QuizService(apiKey);
-    const { questions, quizPdfBuffer, answersPdfBuffer } = await quizService.generateQuiz({
-      topic,
-      level,
-      numberOfQuestions
-    });
+    const { questions } = await response.json();
 
     return NextResponse.json({
       questions,
-      quizPdfBuffer: Array.from(quizPdfBuffer),
-      answersPdfBuffer: Array.from(answersPdfBuffer)
     });
   } catch (error) {
     console.error('Error in quiz generation:', error);
