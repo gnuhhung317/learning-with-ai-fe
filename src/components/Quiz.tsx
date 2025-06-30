@@ -13,7 +13,7 @@ interface FormData {
 interface QuizQuestion {
   question: string;
   options: string[];
-  correctAnswer: number;
+  correctAnswer: number[];
   explanation?: string;
 }
 
@@ -27,7 +27,7 @@ export default function Quiz() {
   const [loading, setLoading] = useState(false);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [selectedAnswers, setSelectedAnswers] = useState<number[]>([]);
+  const [selectedAnswers, setSelectedAnswers] = useState<number[][]>([]);
   const [showResults, setShowResults] = useState<boolean[]>(new Array(questions.length).fill(false));
   const [quizPdfUrl, setQuizPdfUrl] = useState<string | null>(null);
   const [answersPdfUrl, setAnswersPdfUrl] = useState<string | null>(null);
@@ -80,7 +80,7 @@ export default function Quiz() {
 
       const { questions: newQuestions } = await response.json();
       setQuestions(newQuestions);
-      setSelectedAnswers(new Array(newQuestions.length).fill(-1));
+      setSelectedAnswers(Array.from({ length: newQuestions.length }, () => []));
 
       // Generate quiz PDF URL
       const quizResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.QUIZ_PDF_GENERATE}`, {
@@ -146,7 +146,7 @@ export default function Quiz() {
 
       const { questions: newQuestions } = await response.json();
       setQuestions(newQuestions);
-      setSelectedAnswers(new Array(newQuestions.length).fill(-1));
+      setSelectedAnswers(Array.from({ length: newQuestions.length }, () => []));
 
       // Generate quiz PDF URL
       const quizResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.QUIZ_PDF_GENERATE}`, {
@@ -185,13 +185,28 @@ export default function Quiz() {
 
   const handleAnswerSelect = (questionIndex: number, answerIndex: number) => {
     const newAnswers = [...selectedAnswers];
-    newAnswers[questionIndex] = answerIndex;
+    if (!newAnswers[questionIndex]) newAnswers[questionIndex] = [];
+    const idx = newAnswers[questionIndex].indexOf(answerIndex);
+    if (idx > -1) {
+      newAnswers[questionIndex].splice(idx, 1);
+    } else {
+      newAnswers[questionIndex].push(answerIndex);
+    }
     setSelectedAnswers(newAnswers);
   };
 
   const calculateScore = () => {
-    const correctAnswers = selectedAnswers.reduce((count, answer, index) => {
-      return count + (answer === questions[index].correctAnswer ? 1 : 0);
+    const correctAnswers = selectedAnswers.reduce((count, answerArr, index) => {
+      const correct = questions[index].correctAnswer;
+      if (
+        Array.isArray(answerArr) &&
+        answerArr.length === correct.length &&
+        answerArr.every((ans) => correct.includes(ans)) &&
+        correct.every((ans) => answerArr.includes(ans))
+      ) {
+        return count + 1;
+      }
+      return count;
     }, 0);
     return (correctAnswers / questions.length) * 100;
   };
@@ -347,10 +362,10 @@ export default function Quiz() {
                     >
                       <div className="flex items-center">
                         <input
-                          type="radio"
+                          type="checkbox"
                           name={`question-${questionIndex}`}
                           value={optionIndex}
-                          checked={selectedAnswers[questionIndex] === optionIndex}
+                          checked={selectedAnswers[questionIndex]?.includes(optionIndex) || false}
                           onChange={() => handleAnswerSelect(questionIndex, optionIndex)}
                           className="mr-3"
                         />
@@ -361,32 +376,44 @@ export default function Quiz() {
                 </div>
                 {showResults[questionIndex] && (
                   <div className="mt-3 text-sm">
-                    {selectedAnswers[questionIndex] === question.correctAnswer ? (
-                      <div className="text-green-600">
-                        <strong>Chính xác!</strong>
-                        {question.explanation && (
-                          <div className="mt-1 text-gray-600">
-                            <strong>Giải thích:</strong> {question.explanation}
+                    {(() => {
+                      const correct = question.correctAnswer;
+                      const selected = selectedAnswers[questionIndex] || [];
+                      const isCorrect =
+                        selected.length === correct.length &&
+                        selected.every((ans) => correct.includes(ans)) &&
+                        correct.every((ans) => selected.includes(ans));
+                      if (isCorrect) {
+                        return (
+                          <div className="text-green-600">
+                            <strong>Chính xác!</strong>
+                            {question.explanation && (
+                              <div className="mt-1 text-gray-600">
+                                <strong>Giải thích:</strong> {question.explanation}
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="text-red-600">
-                        <strong>Chưa chính xác.</strong> Đáp án đúng là: {String.fromCharCode(65 + question.correctAnswer)}
-                        {question.explanation && (
-                          <div className="mt-1 text-gray-600">
-                            <strong>Giải thích:</strong> {question.explanation}
+                        );
+                      } else {
+                        return (
+                          <div className="text-red-600">
+                            <strong>Chưa chính xác.</strong> Đáp án đúng là: {question.correctAnswer.map(idx => String.fromCharCode(65 + idx)).join(', ')}
+                            {question.explanation && (
+                              <div className="mt-1 text-gray-600">
+                                <strong>Giải thích:</strong> {question.explanation}
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    )}
+                        );
+                      }
+                    })()}
                   </div>
                 )}
               </div>
             ))}
           </div>
 
-          {selectedAnswers.length > 0 && selectedAnswers.every(answer => answer !== -1) && !showResults.some(result => result) && (
+          {selectedAnswers.length > 0 && selectedAnswers.every(answerArr => Array.isArray(answerArr) && answerArr.length > 0) && !showResults.some(result => result) && (
             <div className="flex gap-4">
               <button
                 onClick={() => setShowResults(new Array(questions.length).fill(true))}
@@ -406,7 +433,7 @@ export default function Quiz() {
               </div>
               <button
                 onClick={() => {
-                  setSelectedAnswers(new Array(questions.length).fill(-1));
+                  setSelectedAnswers(Array.from({ length: questions.length }, () => []));
                   setShowResults(new Array(questions.length).fill(false));
                 }}
                 className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700"
