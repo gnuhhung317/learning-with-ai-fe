@@ -1,13 +1,17 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { API_CONFIG } from '../config/api-config';
+import { QuizService, Group, PromptTemplate } from '../services/quiz-service';
 
 interface FormData {
+  title: string;
+  description: string;
   topic: string;
   level: string;
   numberOfQuestions: number;
-  description: string;
+  groupId: string;
+  tags: string;
 }
 
 interface QuizQuestion {
@@ -15,14 +19,18 @@ interface QuizQuestion {
   options: string[];
   correctAnswer: number;
   explanation?: string;
+  promptType: string;
 }
 
 export default function Quiz() {
   const [formData, setFormData] = useState<FormData>({
+    title: '',
+    description: '',
     topic: '',
     level: 'beginner',
     numberOfQuestions: 5,
-    description: ''
+    groupId: '',
+    tags: ''
   });
   const [loading, setLoading] = useState(false);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
@@ -33,6 +41,21 @@ export default function Quiz() {
   const [answersPdfUrl, setAnswersPdfUrl] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>([]);
+
+  const quizService = React.useMemo(() => new QuizService(), []);
+
+  useEffect(() => {
+    quizService
+      .listGroups()
+      .then(setGroups)
+      .catch(() => {});
+    quizService
+      .listPromptTemplates()
+      .then(setPromptTemplates)
+      .catch(() => {});
+  }, [quizService]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -79,8 +102,14 @@ export default function Quiz() {
       }
 
       const { questions: newQuestions } = await response.json();
-      setQuestions(newQuestions);
-      setSelectedAnswers(new Array(newQuestions.length).fill(-1));
+      const mappedQuestions: QuizQuestion[] = newQuestions.map(
+        (q: Omit<QuizQuestion, 'promptType'>) => ({
+          ...q,
+          promptType: 'multiple-choice'
+        })
+      );
+      setQuestions(mappedQuestions);
+      setSelectedAnswers(new Array(mappedQuestions.length).fill(-1));
 
       // Generate quiz PDF URL
       const quizResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.QUIZ_PDF_GENERATE}`, {
@@ -145,8 +174,14 @@ export default function Quiz() {
       }
 
       const { questions: newQuestions } = await response.json();
-      setQuestions(newQuestions);
-      setSelectedAnswers(new Array(newQuestions.length).fill(-1));
+      const mappedQuestions: QuizQuestion[] = newQuestions.map(
+        (q: Omit<QuizQuestion, 'promptType'>) => ({
+          ...q,
+          promptType: 'multiple-choice'
+        })
+      );
+      setQuestions(mappedQuestions);
+      setSelectedAnswers(new Array(mappedQuestions.length).fill(-1));
 
       // Generate quiz PDF URL
       const quizResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.QUIZ_PDF_GENERATE}`, {
@@ -189,6 +224,51 @@ export default function Quiz() {
     setSelectedAnswers(newAnswers);
   };
 
+  const handleCorrectAnswerChange = (questionIndex: number, answerIndex: number) => {
+    const updated = [...questions];
+    updated[questionIndex].correctAnswer = answerIndex;
+    setQuestions(updated);
+  };
+
+  const handlePromptTypeChange = (questionIndex: number, newType: string) => {
+    const updated = [...questions];
+    updated[questionIndex].promptType = newType;
+    setQuestions(updated);
+  };
+
+  const handleSaveQuiz = async () => {
+    try {
+      setLoading(true);
+      const quiz = await quizService.createQuiz({
+        title: formData.title,
+        description: formData.description,
+        groupId: formData.groupId || undefined,
+        tags: formData.tags
+          .split(',')
+          .map(t => t.trim())
+          .filter(Boolean)
+      });
+
+      await Promise.all(
+        questions.map(q =>
+          quizService.addQuestion(quiz.id, {
+            questionText: q.question,
+            options: q.options,
+            correctAnswer: q.correctAnswer,
+            explanation: q.explanation,
+            promptType: q.promptType
+          })
+        )
+      );
+      alert('Quiz saved successfully');
+    } catch (err) {
+      console.error(err);
+      setError('Failed to save quiz');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const calculateScore = () => {
     const correctAnswers = selectedAnswers.reduce((count, answer, index) => {
       return count + (answer === questions[index].correctAnswer ? 1 : 0);
@@ -199,7 +279,45 @@ export default function Quiz() {
   return (
     <div className="max-w-4xl mx-auto p-6">
       <h2 className="text-3xl font-bold mb-8">Tạo Bài Kiểm Tra</h2>
-      
+
+      <div className="mb-8 space-y-6">
+        <div>
+          <label className="block text-sm font-medium mb-2">Tiêu đề</label>
+          <input
+            type="text"
+            value={formData.title}
+            onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+            className="w-full p-2 border rounded-md"
+            required
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-2">Nhóm</label>
+          <select
+            value={formData.groupId}
+            onChange={(e) => setFormData({ ...formData, groupId: e.target.value })}
+            className="w-full p-2 border rounded-md"
+          >
+            <option value="">Không nhóm</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-2">Tags</label>
+          <input
+            type="text"
+            value={formData.tags}
+            onChange={(e) => setFormData({ ...formData, tags: e.target.value })}
+            className="w-full p-2 border rounded-md"
+            placeholder="tag1, tag2"
+          />
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8">
         <div>
           <h3 className="text-xl font-semibold mb-4">Tạo từ chủ đề</h3>
@@ -359,6 +477,36 @@ export default function Quiz() {
                     </label>
                   ))}
                 </div>
+                <div className="mt-3 flex flex-wrap gap-4 items-center">
+                  <div>
+                    <label className="text-sm mr-2">Đáp án đúng:</label>
+                    <select
+                      value={question.correctAnswer}
+                      onChange={(e) => handleCorrectAnswerChange(questionIndex, parseInt(e.target.value))}
+                      className="border rounded p-1"
+                    >
+                      {question.options.map((_, idx) => (
+                        <option key={idx} value={idx}>
+                          {String.fromCharCode(65 + idx)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-sm mr-2">Loại prompt:</label>
+                    <select
+                      value={question.promptType}
+                      onChange={(e) => handlePromptTypeChange(questionIndex, e.target.value)}
+                      className="border rounded p-1"
+                    >
+                      {promptTemplates.map((pt) => (
+                        <option key={pt.id} value={pt.type}>
+                          {pt.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
                 {showResults[questionIndex] && (
                   <div className="mt-3 text-sm">
                     {selectedAnswers[questionIndex] === question.correctAnswer ? (
@@ -385,36 +533,45 @@ export default function Quiz() {
               </div>
             ))}
           </div>
+          <div className="flex flex-col gap-4">
+            <button
+              onClick={handleSaveQuiz}
+              disabled={loading}
+              className="mt-6 w-full bg-purple-600 text-white py-2 px-4 rounded-md hover:bg-purple-700 disabled:bg-purple-300"
+            >
+              {loading ? 'Đang lưu...' : 'Lưu bài kiểm tra'}
+            </button>
 
-          {selectedAnswers.length > 0 && selectedAnswers.every(answer => answer !== -1) && !showResults.some(result => result) && (
-            <div className="flex gap-4">
-              <button
-                onClick={() => setShowResults(new Array(questions.length).fill(true))}
-                className="mt-6 w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700"
-              >
-                Nộp bài
-              </button>
-            </div>
-          )}
+            {selectedAnswers.length > 0 &&
+              selectedAnswers.every((answer) => answer !== -1) &&
+              !showResults.some((result) => result) && (
+                <button
+                  onClick={() => setShowResults(new Array(questions.length).fill(true))}
+                  className="w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700"
+                >
+                  Nộp bài
+                </button>
+              )}
 
-          {showResults.some(result => result) && (
-            <div className="space-y-4">
-              <div className="mt-6 p-4 bg-blue-50 rounded-md">
-                <p className="text-lg font-semibold">
-                  Điểm của bạn: {calculateScore().toFixed(1)}%
-                </p>
+            {showResults.some((result) => result) && (
+              <div className="space-y-4">
+                <div className="mt-6 p-4 bg-blue-50 rounded-md">
+                  <p className="text-lg font-semibold">
+                    Điểm của bạn: {calculateScore().toFixed(1)}%
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    setSelectedAnswers(new Array(questions.length).fill(-1));
+                    setShowResults(new Array(questions.length).fill(false));
+                  }}
+                  className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700"
+                >
+                  Làm lại
+                </button>
               </div>
-              <button
-                onClick={() => {
-                  setSelectedAnswers(new Array(questions.length).fill(-1));
-                  setShowResults(new Array(questions.length).fill(false));
-                }}
-                className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700"
-              >
-                Làm lại
-              </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
     </div>
