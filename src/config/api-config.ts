@@ -4,5 +4,9 @@ export const API_CONFIG = {
     QUIZ: '/api/quiz',
     QUIZ_PDF: '/api/quiz/pdf',
     QUIZ_PDF_GENERATE: '/api/quiz/pdf/generate',
+    QUIZ_ATTEMPT: '/api/quiz/attempt',
+    QUIZ_HISTORY: '/api/quiz/history',
+    QUIZ_SAVED: '/api/quiz/saved',
+    ANALYTICS: '/api/analytics/performance'
   }
 };

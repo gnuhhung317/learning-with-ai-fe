@@ -1,13 +1,16 @@
 "use client";
 
 import React, { useState } from 'react';
+import { useAuth } from '@/context/AuthContext';
+import { useNotification } from '@/context/NotificationContext';
 import { API_CONFIG } from '../config/api-config';
 
 interface FormData {
   topic: string;
   level: string;
   numberOfQuestions: number;
-  description: string;
+  useEnhanced: boolean;
+  bloomLevel: string;
 }
 
 interface QuizQuestion {
@@ -18,11 +21,14 @@ interface QuizQuestion {
 }
 
 export default function Quiz() {
+  const { token } = useAuth();
+  const { addNotification } = useNotification();
   const [formData, setFormData] = useState<FormData>({
-    topic: '',
-    level: 'beginner',
-    numberOfQuestions: 5,
-    description: ''
+  topic: '',
+  level: 'advanced',
+  numberOfQuestions: 20,
+    useEnhanced: true,
+    bloomLevel: 'understand'
   });
   const [loading, setLoading] = useState(false);
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
@@ -33,6 +39,8 @@ export default function Quiz() {
   const [answersPdfUrl, setAnswersPdfUrl] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [currentQuizId, setCurrentQuizId] = useState<number | null>(null);
+  const [quizStartTime, setQuizStartTime] = useState<number | null>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -61,16 +69,23 @@ export default function Quiz() {
     setShowResults(new Array(questions.length).fill(false));
     setQuizPdfUrl(null);
     setAnswersPdfUrl(null);
+    setCurrentQuizId(null);
+    setQuizStartTime(Date.now());
 
     try {
       const pdfFormData = new FormData();
       pdfFormData.append('file', selectedFile);
       pdfFormData.append('numberOfQuestions', String(formData.numberOfQuestions));
       pdfFormData.append('level', formData.level);
-      pdfFormData.append('description', formData.description);
+
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
 
       const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.QUIZ_PDF}`, {
         method: 'POST',
+        headers,
         body: pdfFormData
       });
 
@@ -78,9 +93,20 @@ export default function Quiz() {
         throw new Error('Failed to generate quiz from PDF');
       }
 
-      const { questions: newQuestions } = await response.json();
+      const { questions: newQuestions, quizId } = await response.json();
       setQuestions(newQuestions);
       setSelectedAnswers(new Array(newQuestions.length).fill(-1));
+      setCurrentQuizId(quizId || null);
+
+      // Show success notification
+      if (quizId) {
+        addNotification({
+          type: 'success',
+          title: 'Quiz từ PDF đã được lưu!',
+          message: 'Quiz từ file PDF đã được tạo và lưu thành công.',
+          duration: 3000
+        });
+      }
 
       // Generate quiz PDF URL
       const quizResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.QUIZ_PDF_GENERATE}`, {
@@ -126,17 +152,28 @@ export default function Quiz() {
     setShowResults(new Array(questions.length).fill(false));
     setQuizPdfUrl(null);
     setAnswersPdfUrl(null);
+    setCurrentQuizId(null);
+    setQuizStartTime(Date.now());
 
     try {
-      const response = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.QUIZ}`, {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const endpoint = `${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.QUIZ}`;
+
+      const response = await fetch(endpoint, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({
           topic: formData.topic,
           level: formData.level,
           numberOfQuestions: formData.numberOfQuestions,
+          bloomLevel: formData.bloomLevel,
         })
       });
 
@@ -144,9 +181,20 @@ export default function Quiz() {
         throw new Error('Failed to generate quiz');
       }
 
-      const { questions: newQuestions } = await response.json();
+      const { questions: newQuestions, quizId } = await response.json();
       setQuestions(newQuestions);
       setSelectedAnswers(new Array(newQuestions.length).fill(-1));
+      setCurrentQuizId(quizId || null);
+
+      // Show success notification
+      if (quizId) {
+        addNotification({
+          type: 'success',
+          title: 'Quiz đã được lưu!',
+          message: 'Quiz của bạn đã được tạo và lưu thành công.',
+          duration: 3000
+        });
+      }
 
       // Generate quiz PDF URL
       const quizResponse = await fetch(`${API_CONFIG.BASE_URL}${API_CONFIG.ENDPOINTS.QUIZ_PDF_GENERATE}`, {
@@ -196,6 +244,36 @@ export default function Quiz() {
     return (correctAnswers / questions.length) * 100;
   };
 
+  const submitQuizAttempt = async () => {
+    if (!token || !currentQuizId || !quizStartTime) return;
+
+    try {
+      const timeSpent = Math.floor((Date.now() - quizStartTime) / 1000); // seconds
+      const score = calculateScore();
+
+      await fetch(`${API_CONFIG.BASE_URL}/api/quiz/attempt`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          quizId: currentQuizId,
+          answers: selectedAnswers,
+          timeSpent,
+          score
+        })
+      });
+    } catch (error) {
+      console.error('Error saving quiz attempt:', error);
+    }
+  };
+
+  const handleSubmitQuiz = async () => {
+    setShowResults(new Array(questions.length).fill(true));
+    await submitQuizAttempt();
+  };
+
   return (
     <div className="max-w-4xl mx-auto p-6">
       <h2 className="text-3xl font-bold mb-8">Tạo Bài Kiểm Tra</h2>
@@ -206,11 +284,12 @@ export default function Quiz() {
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
               <label className="block text-sm font-medium mb-2">Chủ đề</label>
-              <input
-                type="text"
+              <textarea
                 value={formData.topic}
                 onChange={(e) => setFormData({ ...formData, topic: e.target.value })}
                 className="w-full p-2 border rounded-md"
+                rows={4}
+                placeholder="Nhập chủ đề hoặc nội dung chi tiết bạn muốn tạo quiz..."
                 required
               />
             </div>
@@ -229,6 +308,22 @@ export default function Quiz() {
             </div>
 
             <div>
+              <label className="block text-sm font-medium mb-2">Mức độ tư duy (Bloom&apos;s Taxonomy)</label>
+              <select
+                value={formData.bloomLevel}
+                onChange={(e) => setFormData({ ...formData, bloomLevel: e.target.value })}
+                className="w-full p-2 border rounded-md"
+              >
+                <option value="remember">Nhớ (Remember) - Nhớ lại thông tin</option>
+                <option value="understand">Hiểu (Understand) - Giải thích ý nghĩa</option>
+                <option value="apply">Áp dụng (Apply) - Sử dụng trong tình huống mới</option>
+                <option value="analyze">Phân tích (Analyze) - Chia nhỏ và xem xét mối quan hệ</option>
+                <option value="evaluate">Đánh giá (Evaluate) - Đưa ra phán đoán</option>
+                <option value="create">Sáng tạo (Create) - Tạo ra cái mới</option>
+              </select>
+            </div>
+
+            <div>
               <label className="block text-sm font-medium mb-2">Số lượng câu hỏi</label>
               <input
                 type="number"
@@ -241,15 +336,19 @@ export default function Quiz() {
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium mb-2">Mô tả chủ đề</label>
-              <textarea
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                className="w-full p-2 border rounded-md"
-                rows={3}
-                placeholder="Nhập mô tả chi tiết về chủ đề để tạo câu hỏi tập trung vào nội dung chính"
-              />
+            <div className="bg-blue-50 p-4 rounded-md">
+              <label className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  checked={formData.useEnhanced}
+                  onChange={(e) => setFormData({ ...formData, useEnhanced: e.target.checked })}
+                  className="rounded"
+                />
+                <span className="text-sm font-medium">🧠 Sử dụng AI nâng cao</span>
+              </label>
+              <p className="text-xs text-gray-600 mt-1">
+                Phân loại câu hỏi theo Bloom&apos;s Taxonomy, điều chỉnh độ khó thông minh và phân tích lỗi sai
+              </p>
             </div>
 
             <button
@@ -277,17 +376,6 @@ export default function Quiz() {
               {fileError && (
                 <p className="text-red-500 text-sm mt-1">{fileError}</p>
               )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium mb-2">Mô tả nội dung PDF</label>
-              <textarea
-                value={formData.description}
-                onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                className="w-full p-2 border rounded-md"
-                rows={3}
-                placeholder="Nhập mô tả về nội dung của tệp PDF để tạo câu hỏi tập trung vào chủ đề chính"
-              />
             </div>
 
             <button
@@ -389,7 +477,7 @@ export default function Quiz() {
           {selectedAnswers.length > 0 && selectedAnswers.every(answer => answer !== -1) && !showResults.some(result => result) && (
             <div className="flex gap-4">
               <button
-                onClick={() => setShowResults(new Array(questions.length).fill(true))}
+                onClick={handleSubmitQuiz}
                 className="mt-6 w-full bg-green-600 text-white py-2 px-4 rounded-md hover:bg-green-700"
               >
                 Nộp bài
